@@ -20,6 +20,7 @@ import {
   templeInfo,
 } from "../../data/journey";
 import { FilmScrubber } from "../film/FilmScrubber";
+import { UpcomingEvents } from "./UpcomingEvents";
 import { useLenisScroll } from "../../hooks/useLenisScroll";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -393,6 +394,8 @@ export function TempleJourney() {
           </figure>
         </div>
       )}
+
+      <UpcomingEvents />
 
       <footer className="journey-footer">
         <p className="footer-name">{templeInfo.nameEnglish}</p>

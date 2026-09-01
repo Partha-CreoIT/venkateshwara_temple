@@ -604,6 +604,130 @@ a {
   color: rgba(248, 241, 223, 0.55);
 }
 
+/* ── Upcoming Events (public feed) ───────────────────────────────── */
+.events-section {
+  position: relative;
+  z-index: 2;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: clamp(3rem, 8vh, 6rem) 1.25rem clamp(2rem, 5vh, 3.5rem);
+}
+
+.events-head {
+  text-align: center;
+  margin-bottom: clamp(2rem, 5vh, 3rem);
+}
+
+.events-eyebrow {
+  margin: 0 0 0.6rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--color-gold-200);
+}
+
+.events-title {
+  margin: 0 0 0.6rem;
+  font-family: var(--font-serif);
+  font-size: clamp(1.6rem, 4.5vw, 2.4rem);
+  color: var(--color-gold-100);
+}
+
+.events-subtitle {
+  margin: 0;
+  font-size: clamp(0.95rem, 2.2vw, 1.05rem);
+  color: rgba(248, 241, 223, 0.7);
+}
+
+.events-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 1.1rem;
+}
+
+.event-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1.4rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 240, 191, 0.16);
+  background: linear-gradient(180deg, rgba(20, 17, 27, 0.72), rgba(13, 11, 18, 0.6));
+  box-shadow: 0 16px 40px rgba(5, 4, 7, 0.4);
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.event-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(226, 189, 99, 0.5);
+  box-shadow: 0 22px 50px rgba(5, 4, 7, 0.5);
+}
+
+.event-badge {
+  align-self: flex-start;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-gold-100);
+  background: rgba(226, 189, 99, 0.16);
+  border: 1px solid rgba(226, 189, 99, 0.35);
+}
+
+.event-name {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  line-height: 1.25;
+  color: var(--color-gold-100);
+}
+
+.event-when {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--color-gold-200);
+}
+
+.event-details {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: rgba(248, 241, 223, 0.75);
+}
+
+.events-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: rgba(248, 241, 223, 0.7);
+  font-size: 0.95rem;
+}
+
+.events-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 240, 191, 0.25);
+  border-top-color: var(--color-gold-200);
+  animation: events-spin 0.8s linear infinite;
+}
+
+@keyframes events-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Fallback journey (reduced motion / no WebGL) */
 
 .journey-fallback {

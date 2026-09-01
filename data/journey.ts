@@ -18,14 +18,16 @@ export const templeInfo = {
   mantraEnglish: "Om Namo Venkatesaya",
 } as const;
 
-export const FILM_FRAME_COUNT = 243;
+export const FILM_FRAME_COUNT = 218;
 
 export const filmFrameSrc = (set: "d" | "m", index: number): string =>
   `/film/${set}/${String(index + 1).padStart(3, "0")}.webp`;
 
-// `at` values are tuned to the 24s scroll film: street → arch → dark
-// threshold → lit hall → golden sanctum → deity darshan (the hall→sanctum→deity
-// run is one continuous shot, new_vd, so those beats flow without a cut).
+// `at` values are tuned to the ~21.75s scroll film (3 clips: vd_1 → vd_3 →
+// new_vd): street → arch → dark threshold → lit stone hall → golden sanctum →
+// deity darshan. vd_1 is the real exterior; a fadeblack (~0.26) steps inside to
+// the stone hall (vd_3, lit ~0.28–0.54); a dissolve (~0.55) flows straight into
+// the deity (new_vd). Keep captions off the fadeblack and dissolve.
 export const journeyChapters: JourneyChapter[] = [
   {
     id: "street",
@@ -42,7 +44,7 @@ export const journeyChapters: JourneyChapter[] = [
     kicker: "The Entrance",
     title: "Under the Arch",
     body: "Marigold garlands sway beneath the blue arch. Leave the world at the threshold — you enter the house of Lakshmi and Venkatesha.",
-    at: 0.2,
+    at: 0.16,
     align: "right",
   },
   {
@@ -51,7 +53,7 @@ export const journeyChapters: JourneyChapter[] = [
     kicker: "The Threshold",
     title: "Crossing In",
     body: "Past the festival torana the street falls silent. Sandal-smoke and lamplight receive you onto sacred ground.",
-    at: 0.37,
+    at: 0.33,
     align: "left",
   },
   {
@@ -60,7 +62,7 @@ export const journeyChapters: JourneyChapter[] = [
     kicker: "The Pillared Hall",
     title: "Toward the Garbhagudi",
     body: "Down the lamp-lit hall every carved pillar leans toward the sanctum, drawing heart and eye to the Lord of the Seven Hills.",
-    at: 0.5,
+    at: 0.45,
     align: "right",
   },
   {
@@ -69,7 +71,7 @@ export const journeyChapters: JourneyChapter[] = [
     kicker: "The Sanctum",
     title: "In Lamplight",
     body: "Within the golden arch He stands in lamplight — Srinivasa, upon whose heart Lakshmi dwells, the wellspring of all prosperity.",
-    at: 0.7,
+    at: 0.58,
     align: "left",
   },
   {
@@ -78,7 +80,7 @@ export const journeyChapters: JourneyChapter[] = [
     kicker: "Darshan",
     title: "Garland upon Garland",
     body: "Garland upon garland at His feet. Behold Venkateshwara — refuge of this age, who turns want to abundance and sorrow to light.",
-    at: 0.9,
+    at: 0.85,
     align: "right",
   },
 ];
