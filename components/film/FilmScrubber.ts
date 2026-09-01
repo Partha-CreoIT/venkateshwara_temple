@@ -1,6 +1,20 @@
+export type FilmAtlas = {
+  src: string;
+  /** Tiles per row in the sheet. */
+  cols: number;
+  tileWidth: number;
+  tileHeight: number;
+};
+
 export type FilmScrubberOptions = {
   frameCount: number;
   frameSrc: (index: number) => string;
+  /**
+   * Low-resolution sheet holding every frame of the sequence in one file. It
+   * lands in about a second and gives the scrubber complete coverage while the
+   * sharp frames are still arriving — see `drawSource` for why that matters.
+   */
+  atlas?: FilmAtlas | null;
   onFirstFrame?: () => void;
   /**
    * Optional low-res canvas that receives a cover-filled copy of the current
@@ -13,18 +27,35 @@ export type FilmScrubberOptions = {
 // tiny — the CSS blur hides everything else and this stays effectively free.
 const BACKDROP_WIDTH = 240;
 
-// Retina (DPR 2) renders the 1600px frames crisply on hi-dpi panels and holds
-// 60fps on GPU-accelerated canvas; the clearRect skip and blend threshold below
-// keep the per-frame cost low enough for weaker devices too.
-const MAX_DPR = 2;
+// The source frames are only 1600px wide, so a retina-sized backing store
+// upscales rather than adding detail — it just quadruples the per-frame fill
+// cost and shows up as scroll judder. Cap well below the device ratio.
+const MAX_DPR = 1.25;
+
 const LOAD_CONCURRENCY = 6;
-const PASS_STRIDES = [16, 4, 1];
+
+// Frames behind the playhead are worth this many frames ahead of it. Scrolling
+// is overwhelmingly forwards, so bandwidth should run ahead of the viewer, but
+// a little backward cover keeps a reversal from falling back to the atlas.
+const BACKWARD_PENALTY = 3;
+
+// A frame that has failed this many times is abandoned to the atlas. Without a
+// cap, the nearest-first picker re-selects a permanently failing frame the
+// instant it settles and spins on it forever.
+const MAX_FRAME_ATTEMPTS = 2;
+
+type FrameSource = HTMLImageElement | ImageBitmap;
 
 /**
  * Scroll-scrubbed frame-sequence player. Draws the film frame matching the
  * current progress onto a canvas, blending adjacent frames for sub-frame
- * smoothness. Frames stream in over three progressively denser passes so the
- * journey is scrubbable before every frame has arrived.
+ * smoothness.
+ *
+ * Loading is two-tier. A single low-res atlas covers the whole sequence almost
+ * immediately; the sharp frames then stream in nearest-to-playhead-first and
+ * replace the atlas tile by tile. The viewer sees a soft frame sharpen rather
+ * than the wrong frame held — which is what a partially-loaded sequence used
+ * to look like, and what read as choppiness.
  */
 export class FilmScrubber {
   private canvas: HTMLCanvasElement;
@@ -32,10 +63,15 @@ export class FilmScrubber {
   private options: FilmScrubberOptions;
   private frames: (HTMLImageElement | null)[];
   private loaded: boolean[];
+  private inflight: boolean[];
+  private attempts: number[];
+  private activeLoads = 0;
+  private atlas: FrameSource | null = null;
   private progress = 0;
-  private dirty = true;
-  private disposed = false;
+  private direction = 1;
   private rafId = 0;
+  private drawnAt = -1;
+  private disposed = false;
   private firstFrameShown = false;
   private frameAspect = 16 / 9;
   private backdropCanvas: HTMLCanvasElement | null;
@@ -43,18 +79,24 @@ export class FilmScrubber {
   private resizeObserver: ResizeObserver | null = null;
   private resizeHandler = () => {
     this.resize();
+    this.invalidate();
   };
 
   constructor(canvas: HTMLCanvasElement, options: FilmScrubberOptions) {
-    const ctx = canvas.getContext("2d");
+    // `alpha: false` lets the compositor skip per-pixel blending on a canvas we
+    // always cover-fill; `desynchronized` unblocks the paint from the main
+    // thread's rAF, which is what scrubbing wants.
+    const ctx = canvas.getContext("2d", {
+      alpha: false,
+      desynchronized: true,
+    }) as CanvasRenderingContext2D | null;
     if (!ctx) {
       throw new Error("FilmScrubber: 2d context unavailable");
     }
     this.canvas = canvas;
     this.ctx = ctx;
-    // Default ("low") smoothing is GPU-fast bilinear. The 1600px-wide source
-    // frames carry enough detail that upscale quality holds up, and "high"
-    // resampling of a retina-sized canvas twice per frame tanks the frame rate.
+    // Default ("low") smoothing is GPU-fast bilinear, and the atlas tiles are
+    // pre-blurred, so nothing here benefits from "high" resampling twice a frame.
     this.ctx.imageSmoothingEnabled = true;
     this.options = options;
     this.backdropCanvas = options.backdropCanvas ?? null;
@@ -63,6 +105,8 @@ export class FilmScrubber {
     }
     this.frames = new Array(options.frameCount).fill(null);
     this.loaded = new Array(options.frameCount).fill(false);
+    this.inflight = new Array(options.frameCount).fill(false);
+    this.attempts = new Array(options.frameCount).fill(0);
   }
 
   async init(): Promise<void> {
@@ -72,22 +116,35 @@ export class FilmScrubber {
     // finale; a ResizeObserver keeps the canvas backing store in step so the
     // grow stays sharp instead of CSS-upscaling a small canvas.
     if (typeof ResizeObserver !== "undefined") {
-      this.resizeObserver = new ResizeObserver(() => this.resize());
+      this.resizeObserver = new ResizeObserver(() => {
+        this.resize();
+        this.invalidate();
+      });
       this.resizeObserver.observe(this.canvas);
     }
 
-    await this.loadFrame(0);
-    this.loadFrame(this.options.frameCount - 1);
-    this.startLoadQueue();
-    this.renderLoop();
+    // The atlas and the opening frame race: whichever lands first clears the
+    // loader. Frame 0 is ~130 KB against the atlas's ~1 MB, so the opening
+    // beat is normally sharp from the very first paint.
+    this.loadAtlas();
+    // Claim a slot for frame 0 before pump() fills the rest, so the opening
+    // frame is always in the first wave rather than merely likely to be.
+    const opening = this.loadFrame(0);
+    this.pump();
+    await opening;
+    this.invalidate();
   }
 
   setProgress(progress: number): void {
     const clamped = Math.min(1, Math.max(0, progress));
-    if (clamped !== this.progress) {
-      this.progress = clamped;
-      this.dirty = true;
+    if (clamped === this.progress) {
+      return;
     }
+    this.direction = clamped >= this.progress ? 1 : -1;
+    this.progress = clamped;
+    this.invalidate();
+    // A new playhead reorders what is worth fetching, so wake the loader too.
+    this.pump();
   }
 
   dispose(): void {
@@ -96,83 +153,149 @@ export class FilmScrubber {
     window.removeEventListener("resize", this.resizeHandler);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    if (this.atlas && "close" in this.atlas) {
+      this.atlas.close();
+    }
+    this.atlas = null;
     this.frames = [];
     this.loaded = [];
+    this.inflight = [];
+    this.attempts = [];
+  }
+
+  private invalidate(): void {
+    if (this.disposed || this.rafId) {
+      return;
+    }
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = 0;
+      this.draw();
+    });
   }
 
   private resize(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     const { clientWidth, clientHeight } = this.canvas;
-    this.canvas.width = Math.round(clientWidth * dpr);
-    this.canvas.height = Math.round(clientHeight * dpr);
-    this.dirty = true;
+    const width = Math.max(1, Math.round(clientWidth * dpr));
+    const height = Math.max(1, Math.round(clientHeight * dpr));
+    if (this.canvas.width === width && this.canvas.height === height) {
+      return;
+    }
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.ctx.imageSmoothingEnabled = true;
+    this.drawnAt = -1;
+  }
+
+  private loadAtlas(): void {
+    const atlas = this.options.atlas;
+    if (!atlas) {
+      return;
+    }
+    const image = new Image();
+    image.decoding = "async";
+    image.fetchPriority = "high";
+    image.src = atlas.src;
+    const ready = async () => {
+      if (this.disposed || this.atlas) {
+        return;
+      }
+      // An ImageBitmap is cheaper to draw sub-rects from repeatedly than a
+      // 13-megapixel <img>, which some browsers re-convert on every drawImage.
+      try {
+        this.atlas = await createImageBitmap(image);
+      } catch {
+        this.atlas = image;
+      }
+      if (this.disposed) {
+        return;
+      }
+      this.invalidate();
+    };
+    image.decode?.().then(ready, () => undefined);
+    image.onload = () => void ready();
   }
 
   private loadFrame(index: number): Promise<void> {
-    if (this.loaded[index] || this.frames[index]) {
+    if (this.disposed || this.loaded[index] || this.inflight[index]) {
       return Promise.resolve();
     }
+    this.inflight[index] = true;
+    this.attempts[index] += 1;
+    this.activeLoads += 1;
     const image = new Image();
     image.decoding = "async";
     this.frames[index] = image;
     return new Promise((resolve) => {
       let settled = false;
-      const ready = () => {
+      const settle = (ok: boolean) => {
         if (settled || this.disposed) {
           return;
         }
         settled = true;
-        this.loaded[index] = true;
-        this.frameAspect = image.naturalWidth / image.naturalHeight;
-        this.dirty = true;
-        resolve();
-      };
-      image.onerror = () => {
-        if (settled) {
-          return;
+        this.activeLoads -= 1;
+        this.inflight[index] = false;
+        if (ok) {
+          this.loaded[index] = true;
+          this.frameAspect = image.naturalWidth / image.naturalHeight;
+          // Only the frame under the playhead changes what is on screen.
+          if (Math.round(this.progress * (this.options.frameCount - 1)) === index) {
+            this.drawnAt = -1;
+            this.invalidate();
+          }
+        } else {
+          this.frames[index] = null;
         }
-        settled = true;
-        this.frames[index] = null;
         resolve();
       };
+      image.onerror = () => settle(false);
       image.src = this.options.frameSrc(index);
       // decode() fully rasterises off the main thread, so the first drawImage
       // during a fast scroll can't trigger a synchronous decode hitch. onload
       // is the fallback for browsers that reject decode() on cached images.
-      image.decode?.().then(ready, () => undefined);
-      image.onload = ready;
+      image.decode?.().then(() => settle(true), () => undefined);
+      image.onload = () => settle(true);
     });
   }
 
-  private startLoadQueue(): void {
-    const queue: number[] = [];
-    const queued = new Set<number>();
-    for (const stride of PASS_STRIDES) {
-      for (let i = 0; i < this.options.frameCount; i += stride) {
-        if (!queued.has(i)) {
-          queued.add(i);
-          queue.push(i);
-        }
-      }
+  /**
+   * Fill the free download slots with the unloaded frames closest to the
+   * playhead, biased in the direction of travel. The atlas already covers the
+   * rest of the film, so bandwidth belongs to whatever the viewer is about to
+   * reach rather than to a fixed front-to-back sweep.
+   */
+  private pump(): void {
+    if (this.disposed) {
+      return;
     }
-    for (let i = 0; i < this.options.frameCount; i += 1) {
-      if (!queued.has(i)) {
-        queue.push(i);
-      }
-    }
-
-    let cursor = 0;
-    const next = (): void => {
-      if (this.disposed || cursor >= queue.length) {
+    while (this.activeLoads < LOAD_CONCURRENCY) {
+      const next = this.nextToLoad();
+      if (next < 0) {
         return;
       }
-      const index = queue[cursor];
-      cursor += 1;
-      this.loadFrame(index).then(next);
-    };
-    for (let lane = 0; lane < LOAD_CONCURRENCY; lane += 1) {
-      next();
+      void this.loadFrame(next).then(() => this.pump());
     }
+  }
+
+  private nextToLoad(): number {
+    const center = this.progress * (this.options.frameCount - 1);
+    let best = -1;
+    let bestCost = Infinity;
+    for (let i = 0; i < this.options.frameCount; i += 1) {
+      if (this.loaded[i] || this.inflight[i] || this.attempts[i] >= MAX_FRAME_ATTEMPTS) {
+        continue;
+      }
+      const delta = i - center;
+      const cost =
+        delta >= 0
+          ? delta * (this.direction >= 0 ? 1 : BACKWARD_PENALTY)
+          : -delta * (this.direction >= 0 ? BACKWARD_PENALTY : 1);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = i;
+      }
+    }
+    return best;
   }
 
   private nearestLoaded(index: number): number {
@@ -190,37 +313,51 @@ export class FilmScrubber {
     return -1;
   }
 
-  private renderLoop = (): void => {
-    if (this.disposed) {
+  private draw(): void {
+    if (this.disposed || !this.canvas.width) {
       return;
     }
-    if (this.dirty) {
-      this.dirty = false;
-      this.draw();
-    }
-    this.rafId = requestAnimationFrame(this.renderLoop);
-  };
-
-  private draw(): void {
     const exact = this.progress * (this.options.frameCount - 1);
+    if (Math.abs(exact - this.drawnAt) < 0.01 && this.drawnAt >= 0) {
+      return;
+    }
+
     const lower = Math.floor(exact);
     const upper = Math.min(lower + 1, this.options.frameCount - 1);
     const blend = exact - lower;
 
-    const base = this.nearestLoaded(lower);
-    if (base < 0) {
+    let painted = false;
+    if (this.loaded[lower]) {
+      this.drawSource(this.frames[lower]!, 1);
+      painted = true;
+      // Blend the neighbour for sub-frame smoothness, but only between two
+      // sharp frames — cross-fading a sharp frame over a soft atlas tile reads
+      // as a ghost, and a second drawImage is not free.
+      if (this.loaded[upper] && upper !== lower && blend > 0.04) {
+        this.drawSource(this.frames[upper]!, blend);
+      }
+    } else if (this.atlas) {
+      // The atlas tile is the *right* frame, only soft. A distant sharp frame
+      // would be the wrong frame held still, which is what a fast scroll used
+      // to look like.
+      this.drawAtlasTile(Math.round(exact));
+      painted = true;
+    } else {
+      const base = this.nearestLoaded(lower);
+      if (base >= 0) {
+        this.drawSource(this.frames[base]!, 1);
+        painted = true;
+      }
+    }
+
+    if (!painted) {
       return;
     }
+    this.drawnAt = exact;
 
-    // The base frame is drawn cover-fill, so it always paints every canvas
-    // pixel — no clearRect needed. The upper frame is alpha-blended on top for
-    // sub-frame smoothness, skipped when its contribution is negligible.
-    this.drawFrame(this.frames[base]!, 1);
-    if (this.loaded[upper] && upper !== base && blend > 0.04) {
-      this.drawFrame(this.frames[upper]!, blend);
+    if (this.loaded[lower]) {
+      this.drawBackdrop(this.frames[lower]!);
     }
-
-    this.drawBackdrop(this.frames[base]!);
 
     if (!this.firstFrameShown) {
       this.firstFrameShown = true;
@@ -228,7 +365,66 @@ export class FilmScrubber {
     }
   }
 
-  private drawBackdrop(image: HTMLImageElement): void {
+  private drawAtlasTile(index: number): void {
+    const atlas = this.options.atlas;
+    if (!this.atlas || !atlas) {
+      return;
+    }
+    const clamped = Math.min(this.options.frameCount - 1, Math.max(0, index));
+    const col = clamped % atlas.cols;
+    const row = Math.floor(clamped / atlas.cols);
+    this.drawSource(
+      this.atlas,
+      1,
+      col * atlas.tileWidth,
+      row * atlas.tileHeight,
+      atlas.tileWidth,
+      atlas.tileHeight,
+    );
+  }
+
+  /**
+   * Cover-fill by cropping the *source* rather than overflowing the
+   * destination — an atlas tile drawn with destination overflow would bleed
+   * its neighbours into frame.
+   */
+  private drawSource(
+    image: FrameSource,
+    alpha: number,
+    sx = 0,
+    sy = 0,
+    sw = 0,
+    sh = 0,
+  ): void {
+    const { canvas, ctx } = this;
+    const naturalW = "naturalWidth" in image ? image.naturalWidth : image.width;
+    const naturalH = "naturalHeight" in image ? image.naturalHeight : image.height;
+    let srcW = sw || naturalW;
+    let srcH = sh || naturalH;
+    if (!srcW || !srcH) {
+      return;
+    }
+
+    // The desktop set is 16:9 and the mobile set is 9:16, so each matches its
+    // viewport orientation and only a small centred crop is discarded.
+    const canvasAspect = canvas.width / canvas.height;
+    const srcAspect = srcW / srcH;
+    if (srcAspect > canvasAspect) {
+      const next = srcH * canvasAspect;
+      sx += (srcW - next) / 2;
+      srcW = next;
+    } else {
+      const next = srcW / canvasAspect;
+      sy += (srcH - next) / 2;
+      srcH = next;
+    }
+
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(image, sx, sy, srcW, srcH, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+  }
+
+  private drawBackdrop(image: FrameSource): void {
     const ctx = this.backdropCtx;
     const canvas = this.backdropCanvas;
     if (!ctx || !canvas) {
@@ -241,32 +437,5 @@ export class FilmScrubber {
     // Stretch the frame to fill the tiny backdrop canvas; aspect distortion is
     // invisible once CSS applies a heavy blur and the film window sits on top.
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  }
-
-  private drawFrame(image: HTMLImageElement, alpha: number): void {
-    const { canvas, ctx } = this;
-    const canvasAspect = canvas.width / canvas.height;
-    // Cover-fill: the desktop set is 16:9 and the mobile set is 9:16, so each
-    // matches its viewport orientation and fills edge-to-edge with only a
-    // small centred overflow crop — no letterbox on any screen.
-    let drawWidth: number;
-    let drawHeight: number;
-    if (canvasAspect > this.frameAspect) {
-      drawWidth = canvas.width;
-      drawHeight = canvas.width / this.frameAspect;
-    } else {
-      drawHeight = canvas.height;
-      drawWidth = canvas.height * this.frameAspect;
-    }
-
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(
-      image,
-      (canvas.width - drawWidth) / 2,
-      (canvas.height - drawHeight) / 2,
-      drawWidth,
-      drawHeight,
-    );
-    ctx.globalAlpha = 1;
   }
 }

@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useGSAP } from "@gsap/react";
+import { gsap } from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 type ApiEvent = {
   id: string;
@@ -39,9 +44,9 @@ function formatRange(startISO: string, endISO: string | null): string {
 }
 
 // "Today" / "Tomorrow" / "in 3 days" (calendar-day difference).
-function relativeLabel(startISO: string): string {
+function relativeLabel(startISO: string, nowMs: number): string {
   const start = new Date(startISO);
-  const now = new Date();
+  const now = new Date(nowMs);
   const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((startDay.getTime() - today.getTime()) / 86_400_000);
@@ -51,9 +56,113 @@ function relativeLabel(startISO: string): string {
   return days > 1 ? `in ${days} days` : `${-days} days ago`;
 }
 
+/** The moment an event stops being upcoming — its end, or its start if open-ended. */
+function closesAt(event: ApiEvent): number {
+  return new Date(event.end_time ?? event.start_time).getTime();
+}
+
+type Countdown = {
+  /** Rendered as three tiles; the unit set narrows as the event approaches. */
+  parts: { value: number; unit: string }[];
+  live: boolean;
+};
+
+function countdownTo(startISO: string, endISO: string | null, now: number): Countdown | null {
+  const start = new Date(startISO).getTime();
+  const end = endISO ? new Date(endISO).getTime() : start;
+  if (now >= start) {
+    // Already begun. Only worth saying so while it is still running.
+    return now <= end ? { parts: [], live: true } : null;
+  }
+
+  const total = Math.floor((start - now) / 1000);
+  const days = Math.floor(total / 86_400);
+  const hours = Math.floor((total % 86_400) / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const seconds = total % 60;
+
+  // Drop the coarsest unit once it reads zero, so the last day counts down in
+  // seconds rather than showing a dead "00 DAYS" tile.
+  const parts = days > 0
+    ? [
+        { value: days, unit: days === 1 ? "day" : "days" },
+        { value: hours, unit: "hrs" },
+        { value: minutes, unit: "min" },
+      ]
+    : [
+        { value: hours, unit: "hrs" },
+        { value: minutes, unit: "min" },
+        { value: seconds, unit: "sec" },
+      ];
+  return { parts, live: false };
+}
+
+/**
+ * One ticking clock for the whole section, driving the countdown, the relative
+ * labels and which event leads. Exposed as an external store so reading it
+ * keeps render pure, and so the server snapshot is an explicit "no clock yet"
+ * rather than a timestamp that could not survive hydration.
+ */
+function subscribeToSecond(onChange: () => void): () => void {
+  const id = setInterval(onChange, 1000);
+  return () => clearInterval(id);
+}
+
+function useNow(): number | null {
+  return useSyncExternalStore(
+    subscribeToSecond,
+    // Rounded to the second so repeated reads within a tick are identical,
+    // which is what useSyncExternalStore requires of a snapshot.
+    () => Math.floor(Date.now() / 1000) * 1000,
+    () => null,
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function EventCountdown({ event, now }: { event: ApiEvent; now: number | null }) {
+  // `now` stays null until the client clock reports, which keeps the first
+  // paint free of a time that would differ between render and hydration.
+  if (now === null) return null;
+  const countdown = countdownTo(event.start_time, event.end_time, now);
+  if (!countdown) return null;
+
+  if (countdown.live) {
+    return (
+      <p className="event-hero-live">
+        <span className="event-hero-live-dot" aria-hidden="true" />
+        Happening now
+      </p>
+    );
+  }
+
+  return (
+    <div className="event-hero-countdown">
+      <ul className="countdown-tiles">
+        {countdown.parts.map((part) => (
+          <li key={part.unit} className="countdown-tile">
+            <span className="countdown-value">
+              {String(part.value).padStart(2, "0")}
+            </span>
+            <span className="countdown-unit">{part.unit}</span>
+          </li>
+        ))}
+      </ul>
+      <span className="countdown-caption">until it begins</span>
+    </div>
+  );
+}
+
 export function UpcomingEvents() {
   const [events, setEvents] = useState<ApiEvent[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const rootRef = useRef<HTMLElement | null>(null);
+  const now = useNow();
 
   useEffect(() => {
     let alive = true;
@@ -78,11 +187,72 @@ export function UpcomingEvents() {
     };
   }, []);
 
+  useGSAP(
+    () => {
+      if (!events?.length || prefersReducedMotion()) {
+        return;
+      }
+      // No explicit ScrollTrigger.refresh() here: each trigger measures itself
+      // on creation, and forcing a global refresh would re-measure the pinned
+      // scroll film above this section for no gain.
+      gsap.from(".event-hero", {
+        opacity: 0,
+        y: 42,
+        duration: 0.9,
+        ease: "power3.out",
+        scrollTrigger: { trigger: ".event-hero", start: "top 88%" },
+      });
+
+      gsap.from(".thread-event", {
+        opacity: 0,
+        y: 26,
+        duration: 0.7,
+        ease: "power3.out",
+        stagger: 0.09,
+        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
+      });
+
+      gsap.from(".thread-medallion", {
+        scale: 0.72,
+        duration: 0.6,
+        ease: "back.out(2)",
+        stagger: 0.09,
+        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
+      });
+
+      // The thread is drawn top-down so the timeline reads as a line being
+      // traced past each medallion rather than appearing all at once.
+      gsap.from(".events-thread-line", {
+        scaleY: 0,
+        transformOrigin: "top center",
+        duration: 1.1,
+        ease: "power2.out",
+        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
+      });
+    },
+    { scope: rootRef, dependencies: [events] },
+  );
+
+  // The nearest event that has not finished leads the section; anything that
+  // has already closed keeps its place in the thread but reads as past. Before
+  // the clock reports, the first event leads — the feed arrives from a fetch,
+  // so in practice the clock is always running by the time there is a list.
+  const featuredIndex =
+    now === null ? 0 : (events?.findIndex((ev) => closesAt(ev) >= now) ?? -1);
+  const featured =
+    events && events.length
+      ? events[featuredIndex >= 0 ? featuredIndex : events.length - 1]
+      : null;
+  const rest = events?.filter((ev) => ev !== featured) ?? [];
+
   return (
-    <section className="events-section" id="events">
+    <section className="events-section" id="events" ref={rootRef}>
+      <div className="events-mandala" aria-hidden="true" />
+
       <header className="events-head">
         <p className="events-eyebrow">ಕಾರ್ಯಕ್ರಮಗಳು · Events</p>
         <h2 className="events-title">Upcoming Events</h2>
+        <span className="events-head-rule" aria-hidden="true" />
         <p className="events-subtitle">
           Festivals, sevas and gatherings at the temple.
         </p>
@@ -100,16 +270,81 @@ export function UpcomingEvents() {
       ) : events.length === 0 ? (
         <div className="events-state">No upcoming events.</div>
       ) : (
-        <ul className="events-grid">
-          {events.map((ev) => (
-            <li key={ev.id} className="event-card">
-              <span className="event-badge">{relativeLabel(ev.start_time)}</span>
-              <h3 className="event-name">{ev.name}</h3>
-              <p className="event-when">{formatRange(ev.start_time, ev.end_time)}</p>
-              {ev.details ? <p className="event-details">{ev.details}</p> : null}
-            </li>
-          ))}
-        </ul>
+        <div className="events-body">
+          {featured ? (
+            <article
+              className={`event-hero ${
+                now !== null && closesAt(featured) < now ? "is-past" : ""
+              }`}
+            >
+              <span className="event-hero-glow" aria-hidden="true" />
+              <div className="event-hero-top">
+                <p className="event-hero-eyebrow">
+                  <span className="event-hero-star" aria-hidden="true">
+                    ✦
+                  </span>
+                  Next at the temple
+                </p>
+                {now !== null ? (
+                  <span className="event-hero-badge">
+                    {relativeLabel(featured.start_time, now)}
+                  </span>
+                ) : null}
+              </div>
+              <h3 className="event-hero-name">{featured.name}</h3>
+              <span className="event-hero-rule" aria-hidden="true" />
+              <p className="event-hero-when">
+                {formatRange(featured.start_time, featured.end_time)}
+              </p>
+              {featured.details ? (
+                <p className="event-hero-details">{featured.details}</p>
+              ) : null}
+              <EventCountdown event={featured} now={now} />
+            </article>
+          ) : null}
+
+          {rest.length ? (
+            <ol className="events-thread">
+              <span className="events-thread-line" aria-hidden="true" />
+              {rest.map((ev) => {
+                const start = new Date(ev.start_time);
+                return (
+                  <li
+                    key={ev.id}
+                    className={`thread-event ${
+                      now !== null && closesAt(ev) < now ? "is-past" : ""
+                    }`}
+                  >
+                    <div className="thread-medallion" aria-hidden="true">
+                      <span className="thread-month">
+                        {start.toLocaleDateString(undefined, { month: "short" })}
+                      </span>
+                      <span className="thread-day">
+                        {String(start.getDate()).padStart(2, "0")}
+                      </span>
+                    </div>
+                    <div className="thread-body">
+                      <div className="thread-top">
+                        <h3 className="thread-name">{ev.name}</h3>
+                        {now !== null ? (
+                          <span className="thread-rel">
+                            {relativeLabel(ev.start_time, now)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="thread-when">
+                        {formatRange(ev.start_time, ev.end_time)}
+                      </p>
+                      {ev.details ? (
+                        <p className="thread-details">{ev.details}</p>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
+        </div>
       )}
     </section>
   );

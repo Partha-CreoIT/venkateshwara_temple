@@ -67,3 +67,7 @@ ffmpeg -v error -y -i "$WORK/master.mp4" -vframes 1 -q:v 3 public/film/poster.jp
 N=$(ls public/film/d | wc -l | tr -d ' ')
 echo "frames: $N  |  desktop $(du -sh public/film/d | cut -f1)  mobile $(du -sh public/film/m | cut -f1)"
 echo "If frame count changed, update FILM_FRAME_COUNT in data/journey.ts (currently expects it)."
+echo
+echo "NOW RUN: bash scripts/build-proxy-atlas.sh"
+echo "  The atlases are built from these frames, so they are stale until rebuilt —"
+echo "  a stale atlas still decodes, it just scrubs to the wrong frames."

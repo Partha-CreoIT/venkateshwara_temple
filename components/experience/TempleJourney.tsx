@@ -14,6 +14,7 @@ import { Volume2, VolumeX } from "lucide-react";
 import {
   darshanPraise,
   FILM_FRAME_COUNT,
+  filmAtlas,
   filmFrameSrc,
   finaleImage,
   journeyChapters,
@@ -147,6 +148,7 @@ export function TempleJourney() {
     const film = new FilmScrubber(canvas, {
       frameCount: FILM_FRAME_COUNT,
       frameSrc: (index) => filmFrameSrc(set, index),
+      atlas: filmAtlas(set),
       onFirstFrame: () => {
         if (!cancelled) {
           setFilmReady(true);
