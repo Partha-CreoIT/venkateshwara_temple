@@ -39,6 +39,10 @@ const LOAD_CONCURRENCY = 6;
 // a little backward cover keeps a reversal from falling back to the atlas.
 const BACKWARD_PENALTY = 3;
 
+// How long after the last progress change the scroll counts as stopped. GSAP's
+// scrub eases for ~120ms past the final input, so this waits just beyond it.
+const SETTLE_MS = 140;
+
 // A frame that has failed this many times is abandoned to the atlas. Without a
 // cap, the nearest-first picker re-selects a permanently failing frame the
 // instant it settles and spins on it forever.
@@ -69,6 +73,9 @@ export class FilmScrubber {
   private atlas: FrameSource | null = null;
   private progress = 0;
   private direction = 1;
+  // Starts settled so the opening frame paints crisp before any scrolling.
+  private settled = true;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private rafId = 0;
   private drawnAt = -1;
   private disposed = false;
@@ -142,6 +149,17 @@ export class FilmScrubber {
     }
     this.direction = clamped >= this.progress ? 1 : -1;
     this.progress = clamped;
+    this.settled = false;
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+    }
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      this.settled = true;
+      // Force a repaint: the position has not changed, only how it is drawn.
+      this.drawnAt = -1;
+      this.invalidate();
+    }, SETTLE_MS);
     this.invalidate();
     // A new playhead reorders what is worth fetching, so wake the loader too.
     this.pump();
@@ -150,6 +168,10 @@ export class FilmScrubber {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
     window.removeEventListener("resize", this.resizeHandler);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -326,14 +348,26 @@ export class FilmScrubber {
     const upper = Math.min(lower + 1, this.options.frameCount - 1);
     const blend = exact - lower;
 
+    // While scrolling, the crossfade below smooths the 10fps source into
+    // continuous motion. Held at a fractional position it is instead a frozen
+    // double exposure — two scooters, two number plates — worst at the frame
+    // edges, where the forward camera move displaces pixels furthest. So once
+    // the scroll settles, land on the single nearest whole frame.
+    const primary = this.settled ? Math.round(exact) : lower;
+
     let painted = false;
-    if (this.loaded[lower]) {
-      this.drawSource(this.frames[lower]!, 1);
+    if (this.loaded[primary]) {
+      this.drawSource(this.frames[primary]!, 1);
       painted = true;
-      // Blend the neighbour for sub-frame smoothness, but only between two
-      // sharp frames — cross-fading a sharp frame over a soft atlas tile reads
-      // as a ghost, and a second drawImage is not free.
-      if (this.loaded[upper] && upper !== lower && blend > 0.04) {
+      // Only ever blend between two sharp frames — cross-fading a sharp frame
+      // over a soft atlas tile reads as a ghost, and a second drawImage is not
+      // free.
+      if (
+        !this.settled &&
+        this.loaded[upper] &&
+        upper !== primary &&
+        blend > 0.04
+      ) {
         this.drawSource(this.frames[upper]!, blend);
       }
     } else if (this.atlas) {
@@ -343,7 +377,7 @@ export class FilmScrubber {
       this.drawAtlasTile(Math.round(exact));
       painted = true;
     } else {
-      const base = this.nearestLoaded(lower);
+      const base = this.nearestLoaded(primary);
       if (base >= 0) {
         this.drawSource(this.frames[base]!, 1);
         painted = true;
@@ -355,8 +389,8 @@ export class FilmScrubber {
     }
     this.drawnAt = exact;
 
-    if (this.loaded[lower]) {
-      this.drawBackdrop(this.frames[lower]!);
+    if (this.loaded[primary]) {
+      this.drawBackdrop(this.frames[primary]!);
     }
 
     if (!this.firstFrameShown) {
