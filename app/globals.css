@@ -218,10 +218,47 @@ a {
   gap: 0.85rem;
   padding: 1.5rem;
   text-align: center;
-  text-shadow: 0 2px 26px rgba(5, 4, 7, 0.95);
+  /* Layered rather than one wide blur: the tight shadow gives the glyph edges
+     definition against bright pixels, the wide one lifts the block off the
+     image. A single 26px blur spread too thin to do either. */
+  text-shadow:
+    0 1px 2px rgba(5, 4, 7, 0.92),
+    0 2px 10px rgba(5, 4, 7, 0.85),
+    0 6px 40px rgba(5, 4, 7, 0.75);
   opacity: 0;
   transition: opacity 0.7s ease;
   pointer-events: none;
+}
+
+/* Legibility scrim for the title card. The opening frame is a bright midday
+   street, and .film-card-sheen only darkens the edges — nothing sits behind the
+   text itself. Centred on the text block so the temple stays visible around it,
+   and it fades out with the hero rather than dimming the whole journey. */
+.journey-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* Centred on the text block, not the frame. A long multi-stop ramp matters
+       here: a short falloff draws a visible oval edge against the flat sky,
+       especially on portrait where the ellipse is tall and narrow. */
+    radial-gradient(
+      ellipse 74% 52% at 50% 48%,
+      rgba(5, 4, 7, 0.78) 0%,
+      rgba(5, 4, 7, 0.64) 36%,
+      rgba(5, 4, 7, 0.4) 60%,
+      rgba(5, 4, 7, 0.16) 82%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(5, 4, 7, 0.5) 0%,
+      transparent 30%,
+      transparent 66%,
+      rgba(5, 4, 7, 0.5) 100%
+    );
 }
 
 .journey-stage.is-intro .journey-hero {
@@ -251,14 +288,14 @@ a {
   font-family: var(--font-serif);
   font-size: clamp(1rem, 2.4vw, 1.35rem);
   letter-spacing: 0.06em;
-  color: rgba(248, 241, 223, 0.92);
+  color: rgba(248, 241, 223, 0.97);
 }
 
 .hero-addr {
   margin: 0;
   font-size: 0.85rem;
   letter-spacing: 0.14em;
-  color: rgba(248, 241, 223, 0.62);
+  color: rgba(248, 241, 223, 0.84);
 }
 
 .scroll-hint {
@@ -269,7 +306,7 @@ a {
   font-size: 0.78rem;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: rgba(248, 241, 223, 0.72);
+  color: rgba(248, 241, 223, 0.9);
   animation: hint-bob 2.4s ease-in-out infinite;
 }
 
@@ -285,7 +322,7 @@ a {
   0%,
   100% {
     transform: translateY(0);
-    opacity: 0.75;
+    opacity: 0.85;
   }
   50% {
     transform: translateY(9px);
