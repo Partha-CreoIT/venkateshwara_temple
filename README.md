@@ -89,12 +89,11 @@ this app's own Postgres database via Drizzle.
 
 ```bash
 # 1. env
-cp .env.example .env.local            # set DATABASE_URL and RBAC_API_URL
+cp .env.example .env.local            # set DATABASE_URL and backend API URLs
 # 2. create the temple DB and push the schema
 createdb temple_dev
 npm run db:push
-# 3. start rbac-db (separate repo) on :8080 and seed an admin account
-#    (see ../rbac-db/README.md — super_admin is created via its seed CLI)
+# 3. point RBAC_API_URL / NEXT_PUBLIC_EVENTS_API_URL at the backend
 # 4. run this app, open http://localhost:3000/admin, sign in
 npm run dev
 ```
@@ -103,7 +102,8 @@ npm run dev
 
 ```
 DATABASE_URL=postgres://<user>@localhost:5432/temple_dev
-RBAC_API_URL=http://localhost:8080/api/v1
+RBAC_API_URL=https://vtemple-api-4.creox.dev/api/v1
+NEXT_PUBLIC_EVENTS_API_URL=https://vtemple-api-4.creox.dev/api/v1
 ```
 
 Only `super_admin` and `trust_admin` accounts can enter the dashboard; a plain

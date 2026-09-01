@@ -12,7 +12,7 @@ type ApiEvent = {
 
 // Public, read-only events feed (rbac-db). Override for other environments.
 const EVENTS_API =
-  process.env.NEXT_PUBLIC_EVENTS_API_URL ?? "http://localhost:8080/api/v1";
+  process.env.NEXT_PUBLIC_EVENTS_API_URL ?? "https://vtemple-api-4.creox.dev/api/v1";
 
 const DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: "short",

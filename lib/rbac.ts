@@ -1,5 +1,5 @@
 // Server-side client for the rbac-db auth/RBAC backend (Go service).
-const BASE = process.env.RBAC_API_URL ?? "http://localhost:8080/api/v1";
+const BASE = process.env.RBAC_API_URL ?? "https://vtemple-api-4.creox.dev/api/v1";
 
 export type RbacTokens = {
   access_token: string;
