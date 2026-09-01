@@ -1,5 +1,5 @@
-import { PilgrimageExperience } from "../components/experience/PilgrimageExperience";
+import { TempleJourney } from "../components/experience/TempleJourney";
 
 export default function Home() {
-  return <PilgrimageExperience />;
+  return <TempleJourney />;
 }

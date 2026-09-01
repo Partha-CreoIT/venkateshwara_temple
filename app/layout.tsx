@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 
-const title = "Lord Sri Venkateshwara | Tirumala Balaji Virtual Darshan";
+const title = "Sri Lakshmi Venkataramana Devamandira | Shivamogga";
 const description =
-  "A cinematic scroll-driven virtual pilgrimage through temple doors, mandapam, sanctum darshan, history, festivals, and the final Govinda Govinda blessing.";
+  "A cinematic scroll journey into Sri Lakshmi Venkataramana Devamandira, Panchavathi Colony, Shivamogga — from the street, under the festival arch, through the mantapa and main hall, to the sanctum darshan.";
 
 async function metadataBaseFromRequest() {
   const headerList = await headers();
@@ -21,13 +21,14 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase,
     title,
     description,
-    applicationName: "Tirumala Balaji Virtual Darshan",
+    applicationName: "Sri Lakshmi Venkataramana Devamandira",
     keywords: [
-      "Lord Sri Venkateshwara",
-      "Tirumala Balaji",
-      "Govinda Govinda",
+      "Sri Lakshmi Venkataramana Devamandira",
+      "Venkataramana temple Shivamogga",
+      "Panchavathi Colony",
+      "Gowda Saraswatha Samaja",
       "virtual darshan",
-      "Tirupati",
+      "Shivamogga temple",
     ],
     openGraph: {
       title,
@@ -38,7 +39,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: "/og.png",
           width: 1200,
           height: 630,
-          alt: "Cinematic Tirumala Balaji virtual darshan social preview",
+          alt: "Sri Lakshmi Venkataramana Devamandira scroll darshan preview",
         },
       ],
     },
