@@ -608,9 +608,46 @@ a {
 .events-section {
   position: relative;
   z-index: 2;
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: clamp(3rem, 8vh, 6rem) 1.25rem clamp(2rem, 5vh, 3.5rem);
+  isolation: isolate;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  padding:
+    clamp(4rem, 9vh, 6.5rem)
+    max(1.25rem, calc((100vw - 72rem) / 2 + 1.25rem))
+    clamp(3rem, 7vh, 5rem);
+  background: #020203;
+}
+
+.events-section::before,
+.events-section::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+}
+
+.events-section::before {
+  z-index: -2;
+  background-image: url("/temple/events-devotional-bg.png");
+  background-position: center;
+  background-size: cover;
+  opacity: 0.58;
+  transform: scale(1.03);
+}
+
+.events-section::after {
+  z-index: -1;
+  background:
+    radial-gradient(circle at 50% 14%, rgba(226, 189, 99, 0.18), transparent 30rem),
+    linear-gradient(
+      180deg,
+      rgba(2, 2, 3, 0.98) 0%,
+      rgba(2, 2, 3, 0.74) 28%,
+      rgba(2, 2, 3, 0.84) 70%,
+      rgba(2, 2, 3, 0.99) 100%
+    );
 }
 
 .events-head {

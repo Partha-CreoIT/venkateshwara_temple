@@ -30,6 +30,8 @@ const scrollLength = () => Math.round(window.innerHeight * 7);
 const CAPTION_WINDOW = 0.055;
 // Past this progress the film window expands to full-screen for the darshan.
 const DARSHAN_EXPAND_AT = 0.88;
+// The interior clip (vd_3) begins here — cue the mantra as we step inside.
+const SECOND_VIDEO_AT = 0.28;
 
 function chapterAtProgress(progress: number): number {
   let active = 0;
@@ -63,6 +65,8 @@ export function TempleJourney() {
   const chapterRef = useRef(0);
   const expandedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mantraAutoRef = useRef(false);
+  const mantraUserSetRef = useRef(false);
   const [chapter, setChapter] = useState(0);
   const [filmFailed, setFilmFailed] = useState(false);
   const [filmReady, setFilmReady] = useState(false);
@@ -84,6 +88,21 @@ export function TempleJourney() {
     if (expandedRef.current !== next) {
       expandedRef.current = next;
       setExpanded(next);
+    }
+  }, []);
+
+  const startMantra = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.loop = true;
+    audio.volume = 0.7;
+    try {
+      await audio.play();
+      setMantraOn(true);
+    } catch {
+      // Browser blocked autoplay — the Mantra button remains for a manual tap.
     }
   }, []);
 
@@ -147,6 +166,14 @@ export function TempleJourney() {
             filmRef.current?.setProgress(self.progress);
             updateChapter(chapterAtProgress(self.progress));
             updateExpanded(self.progress >= DARSHAN_EXPAND_AT);
+            if (
+              self.progress >= SECOND_VIDEO_AT &&
+              !mantraAutoRef.current &&
+              !mantraUserSetRef.current
+            ) {
+              mantraAutoRef.current = true;
+              startMantra();
+            }
           },
         },
       });
@@ -200,7 +227,10 @@ export function TempleJourney() {
         },
       );
     },
-    { scope: rootRef, dependencies: [immersive, updateChapter, updateExpanded] },
+    {
+      scope: rootRef,
+      dependencies: [immersive, updateChapter, updateExpanded, startMantra],
+    },
   );
 
   const scrollToChapter = useCallback(
@@ -226,20 +256,15 @@ export function TempleJourney() {
     if (!audio) {
       return;
     }
+    // Once the user touches the control, stop auto-cueing on scroll.
+    mantraUserSetRef.current = true;
     if (mantraOn) {
       audio.pause();
       setMantraOn(false);
       return;
     }
-    audio.loop = true;
-    audio.volume = 0.7;
-    try {
-      await audio.play();
-      setMantraOn(true);
-    } catch {
-      setMantraOn(false);
-    }
-  }, [mantraOn]);
+    await startMantra();
+  }, [mantraOn, startMantra]);
 
   return (
     <main ref={rootRef} className="journey-root">
