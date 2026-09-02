@@ -20,13 +20,9 @@ DES_W=1600; DES_H=900      # desktop landscape frame size
 MOB_W=630;  MOB_H=1120     # mobile 9:16 portrait frame size
 DES_Q=72; MOB_Q=64
 
-# Using the normal 720p clips. (An external upscale of vd_1 added artifacts, and
-# the framed-window layout keeps 720p sharp without upscaling.)
-# The flight is 3 clips: vd_1 (real temple exterior) -> vd_3 (grand stone hall)
-# -> new_vd (deity darshan, regenerated from vd_3's end frame so it continues the
-# same stone temple). vd_2 was dropped: it was the cream painted interior, a
-# different building from vd_3/new_vd, so vd_2->vd_3 flipped temples mid-flight.
-srcmap() { case "$1" in 1) echo "$VID/vd_1.mp4";; 2) echo "$VID/vd_3.mp4";; 3) echo "$VID/new_vd.mp4";; esac; }
+# The flight is 3 clips: vd_1 (real temple exterior) -> new_vd_2 (pillared hall
+# approaching the sanctum) -> new_vd_3 (deity darshan closeup).
+srcmap() { case "$1" in 1) echo "$VID/vd_1.mp4";; 2) echo "$VID/new_vd_2.mp4";; 3) echo "$VID/new_vd_3.mp4";; esac; }
 
 echo "Sources:"
 for i in 1 2 3; do echo "  clip $i -> $(srcmap $i)"; done
@@ -35,17 +31,27 @@ for i in 1 2 3; do echo "  clip $i -> $(srcmap $i)"; done
 norm() { ffmpeg -v error -y -i "$(srcmap $1)" -vf "scale=1920:1080:flags=lanczos,setsar=1" -an "$WORK/n$1.mp4"; }
 for i in 1 2 3; do norm "$i"; done
 
-# Cut + transitions. vd_1->vd_3 fadeblack (dark doorway -> stepping into the
-# inner sanctum); vd_3->new_vd a short dissolve — they share the same frame so
-# the camera flows straight from the hall into the deity with no dark dip.
+# Probe each clip's real duration so the xfade offsets self-tune to the mapped
+# clips — full clip lengths are used, no hand-edited trim/offset numbers.
+dur() { ffprobe -v error -select_streams v:0 -show_entries stream=duration -of csv=p=0 "$1"; }
+D1=$(dur "$WORK/n1.mp4"); D2=$(dur "$WORK/n2.mp4"); D3=$(dur "$WORK/n3.mp4")
+XF1=0.45; XF2=0.30   # transition durations (clip1->2 fadeblack, clip2->3 fade)
+# Each xfade starts XF before the running timeline ends so it finishes exactly at
+# the outgoing clip's tail. OFF1 = D1-XF1; OFF2 = (D1+D2-XF1)-XF2.
+OFF1=$(awk "BEGIN{printf \"%.3f\", $D1-$XF1}")
+OFF2=$(awk "BEGIN{printf \"%.3f\", $D1+$D2-$XF1-$XF2}")
+echo "durations: $D1 / $D2 / $D3  offsets: $OFF1 / $OFF2"
+
+# Cut + transitions. clip1->clip2 fadeblack (doorway dip -> stepping inside);
+# clip2->clip3 a short dissolve into the deity.
 ffmpeg -v error -y \
   -i "$WORK/n1.mp4" -i "$WORK/n2.mp4" -i "$WORK/n3.mp4" \
   -filter_complex "
-  [0:v]trim=0:6.0,setpts=PTS-STARTPTS[v0];
-  [1:v]trim=0:6.5,setpts=PTS-STARTPTS[v1];
-  [2:v]trim=0:10.0,setpts=PTS-STARTPTS[v2];
-  [v0][v1]xfade=transition=fadeblack:duration=0.45:offset=5.55[x1];
-  [x1][v2]xfade=transition=fade:duration=0.30:offset=11.75,format=yuv420p[out]" \
+  [0:v]trim=0:$D1,setpts=PTS-STARTPTS[v0];
+  [1:v]trim=0:$D2,setpts=PTS-STARTPTS[v1];
+  [2:v]trim=0:$D3,setpts=PTS-STARTPTS[v2];
+  [v0][v1]xfade=transition=fadeblack:duration=$XF1:offset=$OFF1[x1];
+  [x1][v2]xfade=transition=fade:duration=$XF2:offset=$OFF2,format=yuv420p[out]" \
   -map "[out]" -an -c:v libx264 -crf 18 -preset slow "$WORK/master.mp4"
 
 DUR=$(ffprobe -v error -select_streams v:0 -show_entries stream=duration -of csv=p=0 "$WORK/master.mp4")
