@@ -109,7 +109,7 @@ export const finaleImage = "/temple/deity-darshan-highres.jpg";
 
 // Devotional praise shown beneath the deity portrait at the end of the journey.
 export const darshanPraise = {
-  eyebrow: "ದರ್ಶನ · Darshan",
+  eyebrow: { kn: "ದರ್ಶನ", en: "Darshan" },
   heading: "Lord of the Seven Hills, Lakshmi upon His heart",
   paragraphs: [
     "Sri Lakshmi Venkataramana is Lord Srinivasa — Venkateshwara, the destroyer of sins — upon whose heart the Goddess Lakshmi eternally abides. In this age of Kali He is the supreme refuge of the devoted, the Lord to whom every prayer may be carried.",

@@ -23,6 +23,7 @@ import {
 import { FilmScrubber } from "../film/FilmScrubber";
 import { UpcomingEvents } from "./UpcomingEvents";
 import { useLenisScroll } from "../../hooks/useLenisScroll";
+import { all, DUR, reveal, revealLines, scrollProgress, textFill } from "../../lib/motion";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -178,8 +179,11 @@ export function TempleJourney() {
 
   useGSAP(
     () => {
+      const progress = scrollProgress(
+        rootRef.current?.querySelector(".scroll-progress") ?? null,
+      );
       if (!immersive) {
-        return;
+        return progress;
       }
 
       gsap.timeline({
@@ -215,40 +219,47 @@ export function TempleJourney() {
         },
       );
 
-      gsap.fromTo(
-        ".darshan-scroll > *",
-        { autoAlpha: 0, y: 34 },
-        {
-          autoAlpha: 1,
-          y: 0,
-          duration: 0.9,
-          ease: "power2.out",
-          stagger: 0.12,
-          scrollTrigger: {
-            trigger: ".darshan-scroll",
-            start: "top 78%",
-            toggleActions: "play none none reverse",
-          },
-        },
-      );
+      const root = rootRef.current;
 
-      gsap.fromTo(
-        ".darshan-portrait",
-        { autoAlpha: 0, scale: 0.96 },
-        {
-          autoAlpha: 1,
-          scale: 1,
-          duration: 1.1,
-          ease: "power2.out",
-          scrollTrigger: {
-            trigger: ".darshan-panel",
-            start: "top 68%",
-            toggleActions: "play none none reverse",
-          },
-        },
-      );
+      // The darshan band, on the shared vocabulary. Headings get masked-line
+      // reveals; the three praise paragraphs get the scrubbed fill instead,
+      // because the reader's scroll speed there *is* their reading speed.
+      // Body copy is never given an entrance — only the statements are.
+      const cleanups = [
+        reveal(root?.querySelector(".darshan-portrait") ?? null, {
+          y: 0,
+          scale: 0.96,
+          duration: DUR.slow,
+          start: "top 68%",
+        }),
+        revealLines(root?.querySelector(".darshan-heading") ?? null, {
+          start: "top 82%",
+        }),
+        reveal(root?.querySelector(".darshan-scroll") ?? null, {
+          children: ".darshan-eyebrow-en, .darshan-mantra, .darshan-details",
+          start: "top 78%",
+        }),
+        ...Array.from(
+          root?.querySelectorAll<HTMLElement>(".darshan-para") ?? [],
+        ).map((para) => textFill(para)),
+      ];
+
+      return all(progress, ...cleanups);
     },
     { scope: rootRef, dependencies: [immersive, updateChapter, updateExpanded] },
+  );
+
+  useGSAP(
+    () => {
+      if (!immersive || !filmReady) {
+        return;
+      }
+      return revealLines(rootRef.current?.querySelector(".hero-title") ?? null, {
+        immediate: true,
+        delay: 0.15,
+      });
+    },
+    { scope: rootRef, dependencies: [immersive, filmReady] },
   );
 
   const scrollToChapter = useCallback(
@@ -286,6 +297,7 @@ export function TempleJourney() {
 
   return (
     <main ref={rootRef} className="journey-root">
+      <span className="scroll-progress" aria-hidden="true" />
       <audio ref={audioRef} src="/mantra/mantra.mp3" loop preload="none" />
       <button
         type="button"
@@ -330,6 +342,7 @@ export function TempleJourney() {
               <p className="hero-kicker">{templeInfo.samajaKannada}</p>
               <h1 className="hero-title">{templeInfo.nameKannada}</h1>
               <p className="hero-sub">{templeInfo.nameEnglish}</p>
+              <span className="kalasha-rule is-centered" aria-hidden="true" />
               <p className="hero-addr">{templeInfo.address}</p>
               <div className="scroll-hint" aria-hidden="true">
                 <span className="scroll-hint-dot" />
@@ -390,7 +403,11 @@ export function TempleJourney() {
             </figure>
 
             <div className="darshan-scroll">
-              <p className="darshan-eyebrow-en">{darshanPraise.eyebrow}</p>
+              <span className="kalasha-rule" aria-hidden="true" />
+              <p className="darshan-eyebrow-en">
+                <span className="kn">{darshanPraise.eyebrow.kn}</span> ·{" "}
+                {darshanPraise.eyebrow.en}
+              </p>
               <h3 className="darshan-heading">{darshanPraise.heading}</h3>
               {darshanPraise.paragraphs.map((para, index) => (
                 <p key={index} className="darshan-para">
@@ -402,7 +419,7 @@ export function TempleJourney() {
                 <span>{templeInfo.mantraEnglish}</span>
               </p>
               <div className="darshan-details">
-                <p>{templeInfo.samajaKannada}</p>
+                <p className="kn">{templeInfo.samajaKannada}</p>
                 <p>{templeInfo.address}</p>
               </div>
             </div>
@@ -437,6 +454,13 @@ export function TempleJourney() {
           </figure>
         </div>
       )}
+
+      <section className="mantra-band" aria-label="Mantra">
+        <span className="kalasha-rule is-centered" aria-hidden="true" />
+        <p className="mantra-band-text">{templeInfo.mantraKannada}</p>
+        <p className="mantra-band-roman">{templeInfo.mantraEnglish}</p>
+        <span className="kalasha-rule is-centered" aria-hidden="true" />
+      </section>
 
       <UpcomingEvents />
 

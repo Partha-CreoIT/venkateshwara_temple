@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { FILM_ATLAS, filmFrameSrc } from "../data/journey";
+import { fontClassName } from "./fonts";
 import "./globals.css";
 
 const title = "Sri Lakshmi Venkataramana Devamandira | Shivamogga";
@@ -68,7 +69,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={fontClassName}>
       <head>
         {/*
           Start the proxy atlas on the preload scanner rather than waiting for
