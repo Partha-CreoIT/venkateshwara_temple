@@ -3,13 +3,8 @@
 A cinematic, scroll-driven Next.js website for Sri Lakshmi Venkataramana
 Devamandira, Shivamogga. Scrolling scrubs a continuous AI-generated camera
 flight — from the street, under the festival arch, through the hall and into
-the sanctum for darshan — rendered as a WebP frame sequence on a canvas,
-driven by GSAP ScrollTrigger and Lenis smooth scroll.
-
-The film plays inside a **small framed window** over a blurred devotional
-backdrop, which keeps the 720p source sharp (no full-screen upscaling); at the
-final darshan the window **expands to full-screen**. The backdrop is a live
-blurred copy of the current frame plus a gold vignette/mandala.
+the sanctum for darshan — played from a scrub-optimised mp4 (fetched whole and
+served from a blob URL), driven by GSAP ScrollTrigger and Lenis smooth scroll.
 
 ## Prerequisites
 
@@ -37,13 +32,15 @@ npm run start
 - `components/experience/TempleJourney.tsx`: Scroll-driven journey — pinned
   film stage, chapter captions, rail navigation, finale, reduced-motion
   fallback.
-- `components/film/FilmScrubber.ts`: Canvas frame-sequence player with
-  progressive loading and adjacent-frame blending.
-- `data/journey.ts`: Temple info, chapter copy, and film frame manifest.
+- `components/film/FilmScrubber.ts`: Scroll-scrubbed video player — fetches the
+  film once, plays it from a blob URL, and serialises `currentTime` seeks so
+  the decoder is never thrashed.
+- `data/journey.ts`: Temple info, chapter copy, and film video sources.
 - `hooks/`: Lenis and GSAP scroll integration.
-- `public/film/`: Film frames — `d/` (1600×900 landscape, desktop) and `m/`
-  (630×1120 portrait 9:16 centre-crop, phones), plus `film.mp4` render and
-  `poster.jpg`. The scrubber cover-fills, so each set matches its viewport.
+- `public/film/`: Scrub-optimised videos — `d-scrub.mp4` (1600×900 landscape,
+  desktop) and `m-scrub.mp4` (630×1120 portrait 9:16 centre-crop, phones),
+  plus the `film.mp4` playback render and `poster.jpg`. The video
+  cover-fills, so each encode matches its viewport orientation.
 - `public/temple/`: Real temple photographs (chapter fallbacks and finale).
 - `public/mantra/mantra.mp3`: Mantra loop used by the audio toggle.
 - `video/`: Source AI clips. The flight uses `vd_1`, `vd_2`, `vd_3`, and
@@ -55,15 +52,17 @@ npm run start
 
 `scripts/build-film.sh` does everything — trims the clips, joins them (daylight
 fade → fadeblack threshold → a short dissolve for the seamless vd_3→new_vd
-hand-off), exports 10fps WebP frames at both sizes, and writes the mp4/poster:
+hand-off), and writes the scrub-optimised mp4s plus the playback render and
+poster. The scrub encodes use dense keyframes (`-g 8`) and no B-frames so
+scroll seeking decodes only a frame or two per step:
 
 ```bash
 bash scripts/build-film.sh
 ```
 
-Edit the clip list / cut / sizes at the top of that script. If the frame count
-changes, update `FILM_FRAME_COUNT` in `data/journey.ts` and re-check each
-chapter's `at` value lands on lit content (not a transition).
+Edit the clip list / cut / sizes at the top of that script. If the cut changes,
+re-check each chapter's `at` value in `data/journey.ts` lands on lit content
+(not a transition).
 
 **Sharpness:** the source clips are 720p. The small framed window keeps them
 sharp without upscaling; only the full-screen darshan is slightly soft. For

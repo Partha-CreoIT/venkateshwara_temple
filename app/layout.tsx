@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
-import { FILM_ATLAS, filmFrameSrc } from "../data/journey";
 import { fontClassName } from "./fonts";
 import "./globals.css";
 
@@ -70,43 +69,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={fontClassName}>
-      <head>
-        {/*
-          Start the proxy atlas on the preload scanner rather than waiting for
-          hydration — it is what lets the scroll film be scrubbable end to end
-          within about a second. `media` picks the same set the scrubber will
-          (see the 820px breakpoint in TempleJourney) so only one is fetched.
-        */}
-        <link
-          rel="preload"
-          as="image"
-          href={FILM_ATLAS.d.src}
-          media="(min-width: 821px)"
-          fetchPriority="high"
-        />
-        <link
-          rel="preload"
-          as="image"
-          href={FILM_ATLAS.m.src}
-          media="(max-width: 820px)"
-          fetchPriority="high"
-        />
-        {/* Frame 0 is what clears the loader, so it rides at the same priority. */}
-        <link
-          rel="preload"
-          as="image"
-          href={filmFrameSrc("d", 0)}
-          media="(min-width: 821px)"
-          fetchPriority="high"
-        />
-        <link
-          rel="preload"
-          as="image"
-          href={filmFrameSrc("m", 0)}
-          media="(max-width: 820px)"
-          fetchPriority="high"
-        />
-      </head>
       <body>{children}</body>
     </html>
   );

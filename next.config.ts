@@ -7,11 +7,11 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // The film frames and atlases are content-stable build artefacts, but
-        // Next serves /public with `max-age=0, must-revalidate` — which turns
-        // every repeat visit into 218 conditional requests before a single
-        // frame can be drawn. Pin them instead; scripts/build-film.sh is the
-        // only thing that changes them, and it rewrites every file at once.
+        // The film videos are content-stable build artefacts, but Next serves
+        // /public with `max-age=0, must-revalidate` — which would revalidate
+        // the ~19 MB scrub encode on every repeat visit. Pin them instead;
+        // scripts/build-film.sh is the only thing that changes them, and it
+        // rewrites every file at once.
         source: "/film/:path*",
         headers: [
           {

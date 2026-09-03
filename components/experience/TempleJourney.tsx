@@ -13,9 +13,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Volume2, VolumeX } from "lucide-react";
 import {
   darshanPraise,
-  FILM_FRAME_COUNT,
-  filmAtlas,
-  filmFrameSrc,
+  filmVideoSrc,
   finaleImage,
   journeyChapters,
   templeInfo,
@@ -60,7 +58,7 @@ function usePrefersReducedMotion(): boolean {
 
 export function TempleJourney() {
   const rootRef = useRef<HTMLElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const filmRef = useRef<FilmScrubber | null>(null);
   const chapterRef = useRef(0);
   const expandedRef = useRef(false);
@@ -139,17 +137,15 @@ export function TempleJourney() {
     if (!immersive) {
       return;
     }
-    const canvas = canvasRef.current;
-    if (!canvas) {
+    const video = videoRef.current;
+    if (!video) {
       return;
     }
 
     let cancelled = false;
     const set = window.innerWidth <= 820 ? "m" : "d";
-    const film = new FilmScrubber(canvas, {
-      frameCount: FILM_FRAME_COUNT,
-      frameSrc: (index) => filmFrameSrc(set, index),
-      atlas: filmAtlas(set),
+    const film = new FilmScrubber(video, {
+      src: filmVideoSrc(set),
       onFirstFrame: () => {
         if (!cancelled) {
           setFilmReady(true);
@@ -193,7 +189,9 @@ export function TempleJourney() {
           start: "top top",
           end: () => `+=${scrollLength()}`,
           pin: true,
-          scrub: 0.12,
+          // Lenis already eases the scroll position; a scrub on top would
+          // smooth the film a second time and leave it trailing the page.
+          scrub: true,
           invalidateOnRefresh: true,
           onUpdate: (self) => {
             filmRef.current?.setProgress(self.progress);
@@ -326,7 +324,14 @@ export function TempleJourney() {
               .join(" ")}
           >
             <div className="film-card">
-              <canvas ref={canvasRef} className="journey-canvas" aria-hidden="true" />
+              <video
+                ref={videoRef}
+                className="journey-canvas"
+                muted
+                playsInline
+                preload="none"
+                aria-hidden="true"
+              />
               <div className="film-card-sheen" aria-hidden="true" />
             </div>
 

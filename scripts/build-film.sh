@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the scroll-film frame sequences from the source clips.
+# Build the scroll-film videos from the source clips.
 #
 # For each clip it prefers video/vd_N_up.mp4 (upscaled 1080p) when present and
 # falls back to video/vd_N.mp4 (720p). All clips are normalised to a common
@@ -14,11 +14,9 @@ VID=video
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# Frame/encoding settings. Bump DES_W/MOB_W once every clip is 1080p.
-FPS=10
-DES_W=1600; DES_H=900      # desktop landscape frame size
-MOB_W=630;  MOB_H=1120     # mobile 9:16 portrait frame size
-DES_Q=72; MOB_Q=64
+# Encoding settings. Bump DES_W/MOB_W once every clip is 1080p.
+DES_W=1600; DES_H=900      # desktop landscape size
+MOB_W=630;  MOB_H=1120     # mobile 9:16 portrait size
 
 # The flight is 3 clips: vd_1 (real temple exterior) -> new_vd_2 (pillared hall
 # approaching the sanctum) -> new_vd_3 (deity darshan closeup).
@@ -57,23 +55,21 @@ ffmpeg -v error -y \
 DUR=$(ffprobe -v error -select_streams v:0 -show_entries stream=duration -of csv=p=0 "$WORK/master.mp4")
 echo "master: ${DUR}s"
 
-# Extract + encode frames
-rm -rf "$WORK/d" "$WORK/m"; mkdir -p "$WORK/d" "$WORK/m" public/film/d public/film/m
-ffmpeg -v error -y -i "$WORK/master.mp4" -vf "fps=$FPS,scale=$DES_W:$DES_H:flags=lanczos,unsharp=5:5:0.6" "$WORK/d/%03d.png"
-ffmpeg -v error -y -i "$WORK/master.mp4" -vf "fps=$FPS,crop=in_h*9/16:in_h,scale=$MOB_W:$MOB_H:flags=lanczos,unsharp=5:5:0.6" "$WORK/m/%03d.png"
+# Scrub-optimised encodes. Dense keyframes (-g 8) and no B-frames (-bf 0) so a
+# scroll seek decodes at most a handful of frames past the nearest keyframe —
+# that decode cost is what makes or breaks video scrubbing. FilmScrubber
+# fetches one of these whole and scrubs currentTime against a blob URL.
+ffmpeg -v error -y -i "$WORK/master.mp4" \
+  -vf "scale=$DES_W:$DES_H:flags=lanczos,setsar=1,format=yuv420p" \
+  -an -c:v libx264 -crf 23 -preset slow -g 8 -bf 0 -movflags +faststart \
+  public/film/d-scrub.mp4
+ffmpeg -v error -y -i "$WORK/master.mp4" \
+  -vf "crop=in_h*9/16:in_h,scale=$MOB_W:$MOB_H:flags=lanczos,setsar=1,format=yuv420p" \
+  -an -c:v libx264 -crf 23 -preset slow -g 8 -bf 0 -movflags +faststart \
+  public/film/m-scrub.mp4
 
-rm -f public/film/d/*.webp public/film/m/*.webp
-for f in "$WORK"/d/*.png; do cwebp -quiet -q $DES_Q "$f" -o "public/film/d/$(basename "${f%.png}").webp"; done
-for f in "$WORK"/m/*.png; do cwebp -quiet -q $MOB_Q "$f" -o "public/film/m/$(basename "${f%.png}").webp"; done
-
-# mp4 render + poster
+# Playback-quality render + poster
 ffmpeg -v error -y -i "$WORK/master.mp4" -c:v libx264 -crf 23 -preset slow -movflags +faststart -an public/film/film.mp4
 ffmpeg -v error -y -i "$WORK/master.mp4" -vframes 1 -q:v 3 public/film/poster.jpg
 
-N=$(ls public/film/d | wc -l | tr -d ' ')
-echo "frames: $N  |  desktop $(du -sh public/film/d | cut -f1)  mobile $(du -sh public/film/m | cut -f1)"
-echo "If frame count changed, update FILM_FRAME_COUNT in data/journey.ts (currently expects it)."
-echo
-echo "NOW RUN: bash scripts/build-proxy-atlas.sh"
-echo "  The atlases are built from these frames, so they are stale until rebuilt —"
-echo "  a stale atlas still decodes, it just scrubs to the wrong frames."
+echo "desktop $(du -sh public/film/d-scrub.mp4 | cut -f1)  mobile $(du -sh public/film/m-scrub.mp4 | cut -f1)"
