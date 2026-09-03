@@ -1,8 +1,8 @@
 export type FilmScrubberOptions = {
   /**
    * Scrub-optimised encode of the flight (dense keyframes, no B-frames — see
-   * scripts/build-film.sh). Fetched whole, then played from a blob URL so every
-   * seek is served from memory, never from the network.
+   * scripts/build-film.sh). It is served as a normal MP4 URL so mobile browsers
+   * can use native byte-range loading instead of waiting for a whole-file blob.
    */
   src: string;
   onFirstFrame?: () => void;
@@ -11,10 +11,13 @@ export type FilmScrubberOptions = {
 // The source runs at 24fps; a target within half a frame of the playhead is
 // indistinguishable, so seeking again would only churn the decoder.
 const SEEK_EPSILON = 1 / 48;
+const READY_TIMEOUT_MS = 8000;
+const HAVE_METADATA = 1;
+const HAVE_CURRENT_DATA = 2;
 
 /**
- * Scroll-scrubbed video player. The whole film is fetched once and served to a
- * `<video>` element as a blob, then `currentTime` tracks scroll progress.
+ * Scroll-scrubbed video player. The film is attached to a `<video>` element and
+ * `currentTime` tracks scroll progress.
  *
  * Seeks are serialised: only one is ever in flight, and when it lands the
  * scrubber re-checks the target and seeks again only if the scroll moved on.
@@ -25,12 +28,12 @@ const SEEK_EPSILON = 1 / 48;
 export class FilmScrubber {
   private video: HTMLVideoElement;
   private options: FilmScrubberOptions;
-  private objectUrl: string | null = null;
   private duration = 0;
   private targetTime = 0;
   private seeking = false;
   private disposed = false;
   private firstFrameShown = false;
+  private removeGesturePrime: (() => void) | null = null;
 
   private onSeeked = () => {
     this.seeking = false;
@@ -45,43 +48,76 @@ export class FilmScrubber {
   async init(): Promise<void> {
     const { video } = this;
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
     video.preload = "auto";
     video.addEventListener("seeked", this.onSeeked);
 
-    const response = await fetch(this.options.src);
-    if (!response.ok) {
-      throw new Error(`FilmScrubber: ${this.options.src} → HTTP ${response.status}`);
-    }
-    const blob = await response.blob();
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timeoutId: number | null = null;
+
+      const settle = (error?: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+      const onReady = () => {
+        if (video.readyState >= HAVE_METADATA) {
+          settle();
+        }
+      };
+      const onError = () => {
+        const detail = video.error
+          ? `code ${video.error.code}${video.error.message ? `: ${video.error.message}` : ""}`
+          : "unknown media error";
+        settle(new Error(`FilmScrubber: ${this.options.src} failed to load (${detail})`));
+      };
+      const onTimeout = () => {
+        if (video.readyState >= HAVE_METADATA) {
+          settle();
+          return;
+        }
+        settle(new Error(`FilmScrubber: ${this.options.src} did not load metadata`));
+      };
+      const cleanup = () => {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+        video.removeEventListener("loadedmetadata", onReady);
+        video.removeEventListener("loadeddata", onReady);
+        video.removeEventListener("canplay", onReady);
+        video.removeEventListener("error", onError);
+      };
+      timeoutId = window.setTimeout(onTimeout, READY_TIMEOUT_MS);
+      video.addEventListener("loadedmetadata", onReady);
+      video.addEventListener("loadeddata", onReady);
+      video.addEventListener("canplay", onReady);
+      video.addEventListener("error", onError);
+      video.src = this.options.src;
+      video.load();
+    });
     if (this.disposed) {
       return;
     }
 
-    this.objectUrl = URL.createObjectURL(blob);
-    await new Promise<void>((resolve, reject) => {
-      const onReady = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("FilmScrubber: video failed to decode"));
-      };
-      const cleanup = () => {
-        video.removeEventListener("loadeddata", onReady);
-        video.removeEventListener("error", onError);
-      };
-      video.addEventListener("loadeddata", onReady);
-      video.addEventListener("error", onError);
-      video.src = this.objectUrl!;
-    });
+    await this.primeDecoder();
     if (this.disposed) {
       return;
     }
 
     video.pause();
     this.duration = video.duration || 0;
+    if (!this.duration) {
+      throw new Error(`FilmScrubber: ${this.options.src} has no duration`);
+    }
     if (!this.firstFrameShown) {
       this.firstFrameShown = true;
       this.options.onFirstFrame?.();
@@ -104,12 +140,11 @@ export class FilmScrubber {
 
   dispose(): void {
     this.disposed = true;
+    this.removeGesturePrime?.();
+    this.removeGesturePrime = null;
     this.video.removeEventListener("seeked", this.onSeeked);
     this.video.removeAttribute("src");
-    if (this.objectUrl) {
-      URL.revokeObjectURL(this.objectUrl);
-      this.objectUrl = null;
-    }
+    this.video.load();
   }
 
   private kickSeek(): void {
@@ -121,5 +156,48 @@ export class FilmScrubber {
     }
     this.seeking = true;
     this.video.currentTime = this.targetTime;
+  }
+
+  private async primeDecoder(): Promise<void> {
+    if (this.video.readyState >= HAVE_CURRENT_DATA) {
+      return;
+    }
+
+    const primed = await this.tryPlayPause();
+    if (primed || this.disposed) {
+      return;
+    }
+
+    this.installGesturePrime();
+  }
+
+  private async tryPlayPause(): Promise<boolean> {
+    try {
+      await this.video.play();
+      this.video.pause();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private installGesturePrime(): void {
+    if (this.removeGesturePrime) {
+      return;
+    }
+
+    const gestures = ["pointerdown", "touchstart", "keydown", "wheel"];
+    const onGesture = () => {
+      this.removeGesturePrime?.();
+      this.removeGesturePrime = null;
+      void this.tryPlayPause();
+    };
+
+    gestures.forEach((gesture) =>
+      window.addEventListener(gesture, onGesture, { passive: true }),
+    );
+    this.removeGesturePrime = () => {
+      gestures.forEach((gesture) => window.removeEventListener(gesture, onGesture));
+    };
   }
 }

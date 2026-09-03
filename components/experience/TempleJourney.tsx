@@ -329,7 +329,8 @@ export function TempleJourney() {
                 className="journey-canvas"
                 muted
                 playsInline
-                preload="none"
+                preload="auto"
+                poster="/film/poster.jpg"
                 aria-hidden="true"
               />
               <div className="film-card-sheen" aria-hidden="true" />

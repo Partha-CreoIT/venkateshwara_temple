@@ -21,9 +21,7 @@ export const templeInfo = {
 /**
  * Scrub-optimised encodes of the 27.25s flight, one per orientation — dense
  * keyframes (`-g 8`, no B-frames) so a scroll seek only decodes a frame or two
- * past the nearest keyframe. FilmScrubber fetches the file whole and plays it
- * from a blob URL, so scrubbing never touches the network. Built by
- * scripts/build-film.sh.
+ * past the nearest keyframe. Built by scripts/build-film.sh.
  */
 export const filmVideoSrc = (set: "d" | "m"): string => `/film/${set}-scrub.mp4`;
 

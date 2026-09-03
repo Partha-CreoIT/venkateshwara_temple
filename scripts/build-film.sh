@@ -57,8 +57,7 @@ echo "master: ${DUR}s"
 
 # Scrub-optimised encodes. Dense keyframes (-g 8) and no B-frames (-bf 0) so a
 # scroll seek decodes at most a handful of frames past the nearest keyframe —
-# that decode cost is what makes or breaks video scrubbing. FilmScrubber
-# fetches one of these whole and scrubs currentTime against a blob URL.
+# that decode cost is what makes or breaks video scrubbing.
 ffmpeg -v error -y -i "$WORK/master.mp4" \
   -vf "scale=$DES_W:$DES_H:flags=lanczos,setsar=1,format=yuv420p" \
   -an -c:v libx264 -crf 23 -preset slow -g 8 -bf 0 -movflags +faststart \
