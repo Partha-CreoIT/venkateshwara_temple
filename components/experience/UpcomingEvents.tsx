@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { all, DUR, EASE, reducedMotion, reveal, revealLines } from "../../lib/motion";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -118,13 +119,6 @@ function useNow(): number | null {
   );
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
 function EventCountdown({ event, now }: { event: ApiEvent; now: number | null }) {
   // `now` stays null until the client clock reports, which keeps the first
   // paint free of a time that would differ between render and hydration.
@@ -189,45 +183,53 @@ export function UpcomingEvents() {
 
   useGSAP(
     () => {
-      if (!events?.length || prefersReducedMotion()) {
+      if (!events?.length || reducedMotion()) {
         return;
       }
+      const root = rootRef.current;
       // No explicit ScrollTrigger.refresh() here: each trigger measures itself
       // on creation, and forcing a global refresh would re-measure the pinned
       // scroll film above this section for no gain.
-      gsap.from(".event-hero", {
-        opacity: 0,
-        y: 42,
-        duration: 0.9,
-        ease: "power3.out",
-        scrollTrigger: { trigger: ".event-hero", start: "top 88%" },
-      });
-
-      gsap.from(".thread-event", {
-        opacity: 0,
-        y: 26,
-        duration: 0.7,
-        ease: "power3.out",
-        stagger: 0.09,
-        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
-      });
-
-      gsap.from(".thread-medallion", {
-        scale: 0.72,
-        duration: 0.6,
-        ease: "back.out(2)",
-        stagger: 0.09,
-        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
-      });
+      const cleanups = [
+        revealLines(root?.querySelector(".events-title") ?? null),
+        reveal(root?.querySelector(".events-head") ?? null, {
+          children: ".events-eyebrow, .kalasha-rule, .events-subtitle",
+        }),
+        reveal(root?.querySelector(".event-hero") ?? null, {
+          y: 42,
+          duration: DUR.slow,
+        }),
+        // One trigger over the whole thread, staggered — not a trigger per
+        // row. The medallions ride the same stagger as their copy so a row
+        // arrives as one object rather than as two things that happen to
+        // agree, and they use the shared ease: an overshoot here would be the
+        // only bounce on the site.
+        reveal(root?.querySelector(".events-thread") ?? null, {
+          children: ".thread-event",
+          y: 26,
+          start: "top 85%",
+        }),
+        reveal(root?.querySelector(".events-thread") ?? null, {
+          children: ".thread-medallion",
+          y: 0,
+          scale: 0.72,
+          start: "top 85%",
+        }),
+      ];
 
       // The thread is drawn top-down so the timeline reads as a line being
       // traced past each medallion rather than appearing all at once.
-      gsap.from(".events-thread-line", {
+      const line = gsap.from(".events-thread-line", {
         scaleY: 0,
         transformOrigin: "top center",
-        duration: 1.1,
-        ease: "power2.out",
-        scrollTrigger: { trigger: ".events-thread", start: "top 85%" },
+        duration: DUR.slow,
+        ease: EASE,
+        scrollTrigger: { trigger: ".events-thread", start: "top 85%", once: true },
+      });
+
+      return all(...cleanups, () => {
+        line.scrollTrigger?.kill();
+        line.kill();
       });
     },
     { scope: rootRef, dependencies: [events] },
@@ -250,9 +252,11 @@ export function UpcomingEvents() {
       <div className="events-mandala" aria-hidden="true" />
 
       <header className="events-head">
-        <p className="events-eyebrow">ಕಾರ್ಯಕ್ರಮಗಳು · Events</p>
+        <p className="events-eyebrow">
+          <span className="kn">ಕಾರ್ಯಕ್ರಮಗಳು</span> · Events
+        </p>
         <h2 className="events-title">Upcoming Events</h2>
-        <span className="events-head-rule" aria-hidden="true" />
+        <span className="kalasha-rule is-centered" aria-hidden="true" />
         <p className="events-subtitle">
           Festivals, sevas and gatherings at the temple.
         </p>
@@ -292,7 +296,7 @@ export function UpcomingEvents() {
                 ) : null}
               </div>
               <h3 className="event-hero-name">{featured.name}</h3>
-              <span className="event-hero-rule" aria-hidden="true" />
+              <span className="kalasha-rule is-short" aria-hidden="true" />
               <p className="event-hero-when">
                 {formatRange(featured.start_time, featured.end_time)}
               </p>
